@@ -5,21 +5,25 @@ const { fetchTMDBDetails } = require('./services/tmdbService');
 const updatingPages = new Set();
 
 const checkForUpdates = async () => {
+    // Get pages from Notion database
     const pages = await fetchNotionDatabase();
+
     for (const page of pages) {
         const queryString = page.properties.Title.title[0].text.content;
         const pageId = page.id;
 
+        // Skip pages that are already being updated
         if (updatingPages.has(pageId)) {
             continue;
         }
         updatingPages.add(pageId);
 
         try {
+            // Get details from TMDB API
             const details = await fetchTMDBDetails(queryString);
 
+            // Update the Notion database with the details
             if (details) {
-                //console.log(JSON.stringify(details, null, 3));
                 await updateNotionDatabase(page, details);
             }
         } catch (error) {
@@ -31,7 +35,7 @@ const checkForUpdates = async () => {
 };
 
 const startPolling = () => {
-    setInterval(checkForUpdates, 10000);
+    setInterval(checkForUpdates, 5000);
 };
 
 module.exports = { startPolling };

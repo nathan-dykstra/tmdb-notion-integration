@@ -55,19 +55,28 @@ function constructNotionProperties(details) {
         properties['Release Status'] = { status: { name: details.status } };
     }
     if (details.runtime) {
-        properties['Runtime'] = { number: details.runtime };
+        let runtimeString = '';
+        const runtimeHours = Math.floor(details.runtime / 60);
+        if (runtimeHours) {
+            runtimeString += runtimeHours + 'h';
+        }
+        const runtimeMinutes = details.runtime % 60;
+        if (runtimeMinutes) {
+            runtimeString += ' ' + runtimeMinutes + 'm';
+        }
+        properties['Runtime'] = { rich_text: [{ text: { content: runtimeString } }] };
     }
     if (details.synopsis) {
         properties['Synopsis'] = { rich_text: [{ text: { content: details.synopsis } }] };
     }
     if (details.director) {
-        properties['Director'] = { select: { name: details.director, color: 'default' } };
+        properties['Director'] = { rich_text: [{ text: { content: details.director } }] };
     }
     if (details.composer) {
-        properties['Composer'] = { select: { name: details.composer, color: 'default' } };
+        properties['Composer'] = { rich_text: [{ text: { content: details.composer } }] };
     }
     if (details.cast) {
-        properties['Cast'] = { multi_select: details.cast.map(actor => ({ name: actor, color: 'default' })) };
+        properties['Cast'] = { rich_text: [{ text: { content: details.cast.join(', ') } }] };
     }
     if (details.trailer) {
         properties['Trailer'] = { url: details.trailer };
@@ -139,8 +148,8 @@ async function createNotionSeasonPage(showPageId, details) {
 
 async function addErrorBlock(pageId, pageTitle, message) {
     const newTitle = pageTitle.endsWith(notionTitleDelimiter) ? pageTitle.slice(0, -1) : pageTitle;
-    const errorMessage = message + ' Ensure your query is spelled correctly and ends with a semicolon. Your query should be formatted as follows (all filters are optional):\n';
-    const formatMessage = 'Title[year=XXXX, type=movie|tv, language=XX, all_seasons=true|false, all_episodes=true|false];';
+    const errorMessage = message + ' Ensure your query is spelled correctly and ends with a semicolon. A link to the query format guide can be found below.\n\n';
+    const helpLink = 'https://github.com/nathan-dykstra/tmdb-notion-integration';
 
     try {
         // Update the page title to remove the delimiter (ensure it isn't queried again)
@@ -150,31 +159,19 @@ async function addErrorBlock(pageId, pageTitle, message) {
         });
 
         // Add a "callout" block with the error message to the page
-        const calloutBlock = await notion.blocks.children.append({
+        await notion.blocks.children.append({
             block_id: pageId,
             children: [
                 {
                     object: 'block',
                     type: 'callout',
                     callout: {
-                        rich_text: [{ type: 'text', text: { content: errorMessage } }],
+                        rich_text: [
+                            { type: 'text', text: { content: errorMessage } }, 
+                            { type: 'text', text: { content: 'View query format guide', link: { url: helpLink } } }
+                        ],
                         icon: { type: 'emoji', emoji: '❗' },
                         color: 'red_background'
-                    }
-                }
-            ]
-        });
-
-        // Add a "code" block to the error message with the query format guide
-        await notion.blocks.children.append({
-            block_id: calloutBlock.results[0].id,
-            children: [
-                {
-                    object: 'block',
-                    type: 'code',
-                    code: {
-                        rich_text: [{ type: 'text', text: { content: formatMessage } }],
-                        language: 'plain text'
                     }
                 }
             ]
@@ -199,15 +196,6 @@ async function deleteMessageBlocks(pageId) {
                 block_id: errorCalloutBlock.id
             });
             console.log('Error message removed from page');
-        }
-
-        // Delete the "callout" block with the default template message
-        const defaultTemplateCalloutBlock = response.results.find(block => block.type === 'callout' && block.callout.color === 'blue_background');
-        if (defaultTemplateCalloutBlock) {
-            await notion.blocks.delete({
-                block_id: defaultTemplateCalloutBlock.id
-            });
-            console.log('Default template block removed from page');
         }
     } catch (error) {
         console.error('Error removing blocks from page:', error);
@@ -267,14 +255,14 @@ async function checkIfExists(pageId, pageTitle, tmdbId) {
                 ]
             });
 
-            // Automatically delete the page after 30 seconds
-            setTimeout(async () => {
-                await notion.pages.update({
-                    page_id: pageId,
-                    archived: true
-                });
-                console.log('Page archived!');
-            }, 30000);
+            const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+            await wait(30000); // Wait 30 seconds before archiving the page
+
+            await notion.pages.update({
+                page_id: pageId,
+                archived: true
+            });
+            console.log('Page archived!');
 
             return true;
         }

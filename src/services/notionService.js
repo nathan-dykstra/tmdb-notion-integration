@@ -5,12 +5,16 @@ const notion = new Client({ auth: process.env.NOTION_API_TOKEN });
 const notionDatabaseId = process.env.NOTION_DATABASE_ID;
 const notionTitleDelimiter = ';';
 
+/**
+ * Fetch Notion pages where "Title" ends with the delimiter ';'.
+ * @returns 
+ */
 const fetchNotionPages = async () => {
     // Query Notion pages where page title ends with the delimiter
     const query = { 
         database_id: notionDatabaseId,
         filter: { property: 'Title', title: { ends_with: notionTitleDelimiter } },
-    }
+    };
 
     try {
         const response = await notion.databases.query(query);
@@ -29,19 +33,30 @@ const fetchNotionPages = async () => {
     }
 };
 
+/**
+ * Fetch Notion pages where "Release Status" is not "Released", "Ended", or "Cancelled", or the
+ * release date is on or after today's date.
+ * @returns
+ */
 const fetchNotionUnreleasedPages = async () => {
-    // Query Notion pages where "Release Status" is not "Released", "Ended", or "Cancelled"
+    const today = new Date().toISOString().split('T')[0];
+
     const query = {
         database_id: notionDatabaseId,
         filter: {
-            and: [
-                { property: 'Release Status', status: { does_not_equal: 'Released' } },
-                { property: 'Release Status', status: { does_not_equal: 'Ended' } },
-                { property: 'Release Status', status: { does_not_equal: 'Cancelled' } },
-                { property: 'Release Status', status: { is_not_empty: true } },
+            or: [
+                { property: 'Release Date', date: { on_or_after: today } },
+                {
+                    and: [
+                        { property: 'Release Status', status: { does_not_equal: 'Released' } },
+                        { property: 'Release Status', status: { does_not_equal: 'Ended' } },
+                        { property: 'Release Status', status: { does_not_equal: 'Cancelled' } },
+                        { property: 'Release Status', status: { is_not_empty: true } },
+                    ]
+                }
             ]
         }
-    }
+    };
 
     try {
         const response = await notion.databases.query(query);
@@ -58,8 +73,51 @@ const fetchNotionUnreleasedPages = async () => {
     } catch (error) {
         console.error('Error fetching unreleased Notion pages:', error);
     }
-}
+};
 
+/**
+ * Get the TMDB show ID of the parent show of the season "seasonPage".
+ * @param {*} seasonPage 
+ * @returns 
+ */
+const getTMDBShowIdFromSeason = async (seasonPage) => {
+    try {
+        const show = await notion.pages.retrieve({
+            page_id: seasonPage.properties['Show'].relation[0].id
+        });
+
+        return show.properties['TMDB ID'].number;
+    } catch (error) {
+        console.error('Error fetching the TMDB show ID from season page:', error);
+    }
+};
+
+/**
+ * Get the TMDB show ID of the parent show of the episode "episodePage".
+ * @param {*} episodePage 
+ * @returns 
+ */
+const getTMDBShowIdFromEpisode = async (episodePage) => {
+    try {
+        const season = await notion.pages.retrieve({
+            page_id: episodePage.properties['Season'].relation[0].id
+        });
+
+        const show = await notion.pages.retrieve({
+            page_id: season.properties['Show'].relation[0].id
+        });
+
+        return show.properties['TMDB ID'].number;
+    } catch (error) {
+        console.error('Error fetching the TMDB show ID from episode page:', error);
+    }
+};
+
+/**
+ * Constructs a Notion properites object from "details".
+ * @param {*} details 
+ * @returns 
+ */
 function constructNotionProperties(details) {
     const properties = {};
 
@@ -124,12 +182,17 @@ function constructNotionProperties(details) {
     return properties;
 }
 
+/**
+ * Create a Notion page for a television episode from "details".
+ * @param {number} seasonPageId 
+ * @param {*} details 
+ */
 async function createNotionEpisodePage(seasonPageId, details) {
     const properties = constructNotionProperties(details);
     properties['Season'] = { relation: [{ id: seasonPageId }] };
 
-    const icon = details.poster ? { type: "external", external: { url: details.poster } } : null;
-    const cover = details.backdrop ? { type: "external", external: { url: details.backdrop } } : null;
+    const icon = details.poster ? { type: 'external', external: { url: details.poster } } : null;
+    const cover = details.backdrop ? { type: 'external', external: { url: details.backdrop } } : null;
 
     try {
         await notion.pages.create({
@@ -144,12 +207,17 @@ async function createNotionEpisodePage(seasonPageId, details) {
     }
 }
 
+/**
+ * Create a Notion page for a television season from "details".
+ * @param {number} showPageId 
+ * @param {*} details 
+ */
 async function createNotionSeasonPage(showPageId, details) {
     const properties = constructNotionProperties(details);
     properties['Show'] = { relation: [{ id: showPageId }] };
 
-    const icon = details.poster ? { type: "external", external: { url: details.poster } } : null;
-    const cover = details.backdrop ? { type: "external", external: { url: details.backdrop } } : null;
+    const icon = details.poster ? { type: 'external', external: { url: details.poster } } : null;
+    const cover = details.backdrop ? { type: 'external', external: { url: details.backdrop } } : null;
 
     try {
         const response = await notion.pages.create({
@@ -170,6 +238,12 @@ async function createNotionSeasonPage(showPageId, details) {
     }
 }
 
+/**
+ * Adds an error block with "message" to the Notion page with ID "pageId".
+ * @param {number} pageId 
+ * @param {string} pageTitle 
+ * @param {string} message 
+ */
 async function addErrorBlock(pageId, pageTitle, message) {
     const newTitle = pageTitle.endsWith(notionTitleDelimiter) ? pageTitle.slice(0, -1) : pageTitle;
     const errorMessage = message + '\n\n';
@@ -207,6 +281,10 @@ async function addErrorBlock(pageId, pageTitle, message) {
     }
 }
 
+/**
+ * Deletes all error blocks from the Notion page with ID "pageId".
+ * @param {number} pageId 
+ */
 async function deleteMessageBlocks(pageId) {
     try {
         const response = await notion.blocks.children.list({
@@ -226,6 +304,13 @@ async function deleteMessageBlocks(pageId) {
     }
 }
 
+/**
+ * Checks if a page already exists in the Notion database with the same TMDB ID as the page with ID "pageId".
+ * @param {number} pageId 
+ * @param {string} pageTitle 
+ * @param {number} tmdbId 
+ * @returns 
+ */
 async function checkIfExists(pageId, pageTitle, tmdbId) {
     try {
         // Check if the page already exists using the TMDB ID
@@ -243,6 +328,7 @@ async function checkIfExists(pageId, pageTitle, tmdbId) {
             const existingPageId = response.results[0].id;
             const alreadyExistsMessage = 'The requested movie or TV show already exists in your database! You can find a link to the page below. This page will be automatically deleted in 30 seconds.\n';
 
+            // The current page does not count for checking if the content already exists
             if (existingPageId === pageId) {
                 return false;
             }
@@ -296,6 +382,12 @@ async function checkIfExists(pageId, pageTitle, tmdbId) {
     }
 }
 
+/**
+ * Updates the Notion page "page" with the content from "details".
+ * @param {*} page 
+ * @param {*} details 
+ * @returns 
+ */
 const updateNotionDatabase = async (page, details) => {
     const pageId = page.id;
     const pageTitle = page.properties.Title.title[0].text.content;
@@ -328,11 +420,16 @@ const updateNotionDatabase = async (page, details) => {
         for (const season of details.seasons) {
             await createNotionSeasonPage(pageId, season);
         }
+    } else if (details.episodes) {
+        // Create TV show episode pages
+        for (const episode of details.episodes) {
+            await createNotionEpisodePage(pageId, episode);
+        }
     }
 
     const properties = constructNotionProperties(details);
-    const icon = details.poster ? { type: "external", external: { url: details.poster } } : null;
-    const cover = details.backdrop ? { type: "external", external: { url: details.backdrop } } : null;
+    const icon = details.poster ? { type: 'external', external: { url: details.poster } } : null;
+    const cover = details.backdrop ? { type: 'external', external: { url: details.backdrop } } : null;
 
     try {
         await notion.pages.update({
@@ -347,4 +444,10 @@ const updateNotionDatabase = async (page, details) => {
     }
 };
 
-module.exports = { fetchNotionPages, fetchNotionUnreleasedPages, updateNotionDatabase };
+module.exports = { 
+    fetchNotionPages,
+    fetchNotionUnreleasedPages,
+    getTMDBShowIdFromSeason,
+    getTMDBShowIdFromEpisode,
+    updateNotionDatabase
+};

@@ -5,16 +5,40 @@ const notion = new Client({ auth: process.env.NOTION_API_TOKEN });
 const notionDatabaseId = process.env.NOTION_DATABASE_ID;
 const notionTitleDelimiter = ';';
 
-const fetchNotionDatabase = async () => {
-    const fiveMinutesAgo = new Date(Date.now() - (5 * 60 * 1000)).toISOString();
-
-    // Query recently updated Notion pages with a title ending with the delimiter
+const fetchNotionPages = async () => {
+    // Query Notion pages where page title ends with the delimiter
     const query = { 
+        database_id: notionDatabaseId,
+        filter: { property: 'Title', title: { ends_with: notionTitleDelimiter } },
+    }
+
+    try {
+        const response = await notion.databases.query(query);
+        let nextCursor = response.next_cursor;
+
+        // Get all pages if results are paginated
+        while (nextCursor) {
+            const nextResponse = await notion.databases.query(query);
+            response.results.push(...nextResponse.results);
+            nextCursor = nextResponse.next_cursor;
+        }
+
+        return response.results;
+    } catch (error) {
+        console.error('Error fetching Notion pages:', error);
+    }
+};
+
+const fetchNotionUnreleasedPages = async () => {
+    // Query Notion pages where "Release Status" is not "Released", "Ended", or "Cancelled"
+    const query = {
         database_id: notionDatabaseId,
         filter: {
             and: [
-                { property: 'Title', title: { ends_with: notionTitleDelimiter } },
-                { timestamp: 'last_edited_time', last_edited_time: { after: fiveMinutesAgo } }
+                { property: 'Release Status', status: { does_not_equal: 'Released' } },
+                { property: 'Release Status', status: { does_not_equal: 'Ended' } },
+                { property: 'Release Status', status: { does_not_equal: 'Cancelled' } },
+                { property: 'Release Status', status: { is_not_empty: true } },
             ]
         }
     }
@@ -32,9 +56,9 @@ const fetchNotionDatabase = async () => {
 
         return response.results;
     } catch (error) {
-        console.error('Error fetching Notion database:', error);
+        console.error('Error fetching unreleased Notion pages:', error);
     }
-};
+}
 
 function constructNotionProperties(details) {
     const properties = {};
@@ -148,8 +172,8 @@ async function createNotionSeasonPage(showPageId, details) {
 
 async function addErrorBlock(pageId, pageTitle, message) {
     const newTitle = pageTitle.endsWith(notionTitleDelimiter) ? pageTitle.slice(0, -1) : pageTitle;
-    const errorMessage = message + ' Ensure your query is spelled correctly and ends with a semicolon. A link to the query format guide can be found below.\n\n';
-    const helpLink = 'https://github.com/nathan-dykstra/tmdb-notion-integration';
+    const errorMessage = message + '\n\n';
+    const helpLink = 'https://github.com/nathan-dykstra/tmdb-notion-integration?tab=readme-ov-file#tmdb-notion-integration';
 
     try {
         // Update the page title to remove the delimiter (ensure it isn't queried again)
@@ -323,4 +347,4 @@ const updateNotionDatabase = async (page, details) => {
     }
 };
 
-module.exports = { fetchNotionDatabase, updateNotionDatabase };
+module.exports = { fetchNotionPages, fetchNotionUnreleasedPages, updateNotionDatabase };

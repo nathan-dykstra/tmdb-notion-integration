@@ -1,7 +1,12 @@
 const axios = require('axios');
 require('dotenv').config();
 
+const baseTmdbUrl = 'https://api.themoviedb.org/3';
 const tmdbApiKey = process.env.TMDB_API_KEY;
+const headers = {
+    accept: 'application/json',
+    Authorization: `Bearer ${tmdbApiKey}`
+};
 
 /**
  * Validates the key-value pairs in the query filters
@@ -71,43 +76,45 @@ function parseQueryString(queryString) {
     };
 }
 
-async function fetchTMDBSeasonDetails(showId, seasonNumber, headers) {
+async function fetchTMDBSeasonDetails(showId, seasonNumber) {
     const params = {
         append_to_response: 'credits,videos'
-    }
+    };
 
     const options = {
         method: 'GET',
         headers: headers,
         params: params,
-        url: `https://api.themoviedb.org/3/tv/${showId}/season/${seasonNumber}`
-    }
+        url: `${baseTmdbUrl}/tv/${showId}/season/${seasonNumber}`
+    };
 
     try {
         const response = await axios.request(options);
         return response.data;
     } catch (error) {
         console.error('Error fetching TMDB season details', error);
+        throw new Error(); // Error handled in the calling function
     }
 }
 
-async function fetchTMDBEpisodeDetails(showId, seasonNumber, episodeNumber, headers) {
+async function fetchTMDBEpisodeDetails(showId, seasonNumber, episodeNumber) {
     const params = {
         append_to_response: 'credits'
-    }
+    };
 
     const options = {
         method: 'GET',
         headers: headers,
         params: params,
-        url: `https://api.themoviedb.org/3/tv/${showId}/season/${seasonNumber}/episode/${episodeNumber}`
-    }
+        url: `${baseTmdbUrl}/tv/${showId}/season/${seasonNumber}/episode/${episodeNumber}`
+    };
 
     try {
         const response = await axios.request(options);
         return response.data;
-    } catch (error) {     
+    } catch (error) {
         console.error('Error fetching TMDB episode details', error);
+        throw new Error(); // Error handled in the calling function
     }
 }
 
@@ -227,14 +234,9 @@ const fetchTMDBDetails = async (name) => {
 
     // Set up the initial TMDB search
 
-    const headers = {
-        accept: 'application/json',
-        Authorization: `Bearer ${tmdbApiKey}`
-    }
-
     const searchParams = {
         query: tmdbQuery.mainQuery,
-    }
+    };
 
     const searchOptions = {
         method: 'GET',
@@ -247,17 +249,17 @@ const fetchTMDBDetails = async (name) => {
             if (tmdbQuery.filters.year) {
                 searchParams.primary_release_year = tmdbQuery.filters.year;
             }
-            searchOptions.url = 'https://api.themoviedb.org/3/search/movie';
+            searchOptions.url = `${baseTmdbUrl}/search/movie`;
         } else if (tvTypes.includes(tmdbQuery.filters.type)) {
             // TV search type
             if (tmdbQuery.filters.year) {
                 searchParams.year = tmdbQuery.filters.year;
             }
-            searchOptions.url = 'https://api.themoviedb.org/3/search/tv';
+            searchOptions.url = `${baseTmdbUrl}/search/tv`;
         }
     } else {
         // Multi search type
-        searchOptions.url = 'https://api.themoviedb.org/3/search/multi';
+        searchOptions.url = `${baseTmdbUrl}/search/multi`;
     }
 
     searchOptions.params = searchParams;
@@ -273,7 +275,7 @@ const fetchTMDBDetails = async (name) => {
             method: 'GET',
             headers: headers,
             params: detailsParams
-        }
+        };
 
         const result = searchResponse.data.results[0];
 
@@ -281,10 +283,10 @@ const fetchTMDBDetails = async (name) => {
 
         if (result) {
             if (movieTypes.includes(tmdbQuery.filters.type) || result.media_type === 'movie') {
-                detailsOptions.url = `https://api.themoviedb.org/3/movie/${result.id}`
+                detailsOptions.url = `${baseTmdbUrl}/movie/${result.id}`
             } else if (tvTypes.includes(tmdbQuery.filters.type) || result.media_type === 'tv') {
                 isTelevision = true;
-                detailsOptions.url = `https://api.themoviedb.org/3/tv/${result.id}`
+                detailsOptions.url = `${baseTmdbUrl}/tv/${result.id}`
             } else {
                 return {
                     error: 'No results found!'
@@ -298,17 +300,29 @@ const fetchTMDBDetails = async (name) => {
 
                 // Get a single season or episode if specified in the filters
                 if (tmdbQuery.filters.season) {
-                    const seasonData = await fetchTMDBSeasonDetails(data.id, tmdbQuery.filters.season, headers);
-                    const seasonDetails = constructSeasonDetails(data, seasonData);
+                    try {
+                        const seasonData = await fetchTMDBSeasonDetails(data.id, tmdbQuery.filters.season);
+                        const seasonDetails = constructSeasonDetails(data, seasonData);
 
-                    if (tmdbQuery.filters.episode) {
-                        const episodeData = await fetchTMDBEpisodeDetails(data.id, tmdbQuery.filters.season, tmdbQuery.filters.episode, headers);
-                        const episodeDetails = constructEpisodeDetails(data, seasonData, episodeData);
+                        if (tmdbQuery.filters.episode) {
+                            try {
+                                const episodeData = await fetchTMDBEpisodeDetails(data.id, tmdbQuery.filters.season, tmdbQuery.filters.episode);
+                                const episodeDetails = constructEpisodeDetails(data, seasonData, episodeData);
 
-                        return episodeDetails;
+                                return episodeDetails;
+                            } catch (error) {
+                                return {
+                                    error: 'An error occurred while fetching TMDB details! Ensure the season and episode numbers are valid.'
+                                }
+                            }
+                        }
+
+                        return seasonDetails;
+                    } catch (error) {
+                        return {
+                            error: 'An error occurred while fetching TMDB details! Ensure the season number is valid.'
+                        }
                     }
-
-                    return seasonDetails;
                 }
 
                 // Get season and episode details for television shows (if necessary)
@@ -318,14 +332,14 @@ const fetchTMDBDetails = async (name) => {
                     const seasons = data.seasons.filter(season => season.season_number > 0).map(season => season.season_number);
 
                     const seasonPromises = seasons.map(async (season) => {
-                        const seasonData = await fetchTMDBSeasonDetails(data.id, season, headers);
+                        const seasonData = await fetchTMDBSeasonDetails(data.id, season);
                         const seasonDetails = constructSeasonDetails(data, seasonData);
 
                         if (trueFilters.includes(tmdbQuery.filters.all_episodes)) {
                             const episodes = seasonData.episodes.map(episode => episode.episode_number);
 
                             const episodePromises = episodes.map(async (episode) => {
-                                const episodeData = await fetchTMDBEpisodeDetails(data.id, season, episode, headers);
+                                const episodeData = await fetchTMDBEpisodeDetails(data.id, season, episode);
                                 const episodeDetails = constructEpisodeDetails(data, seasonData, episodeData);
 
                                 return episodeDetails;
@@ -362,4 +376,57 @@ const fetchTMDBDetails = async (name) => {
     }
 };
 
-module.exports = { fetchTMDBDetails };
+const fetchTMDBMovieDetails = async (movieId) => {
+    const params = {
+        append_to_response: 'credits,videos'
+    };
+
+    const options = {
+        method: 'GET',
+        headers: headers,
+        params: params,
+        url: `${baseTmdbUrl}/movie/${movieId}`
+    };
+
+    try {
+        const response = await axios.request(options);
+        const data = response.data;
+        const details = constructDetails(data, false);
+        return details;
+    } catch (error) {
+        console.error('Error fetching TMDB movie details', error);
+        return {
+            error: 'An error occurred while auto-updating an unreleased movie! Ensure the TMDB ID was not altered by mistake.'
+        }
+    }
+};
+
+const fetchTMDBTelevisionDetails = async (showId, includeSeasons = false, includeEpisodes = false) => {
+    const params = {
+        append_to_response: 'credits,videos'
+    };
+
+    const options = {
+        method: 'GET',
+        headers: headers,
+        params: params,
+        url: `${baseTmdbUrl}/tv/${showId}`
+    };
+
+    try {
+        const response = await axios.request(options);
+        const data = response.data;
+        const details = constructDetails(data, true);
+
+        // TODO: seasons and episodes (if necessary)
+
+        return details;
+    } catch (error) {
+        console.error('Error fetching TMDB television details', error);
+        return {
+            error: 'An error occurred while auto-updating a returning TV show! Ensure the TMDB ID was not altered by mistake.'
+        }
+    }
+};
+
+module.exports = { fetchTMDBDetails, fetchTMDBMovieDetails, fetchTMDBTelevisionDetails };

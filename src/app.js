@@ -123,7 +123,29 @@ const updateUnreleasedContent = async () => {
                     await notionService.updateDatabase(page, details);
                 }
             } else if (type === 'Miniseries') {
-                // TODO
+                try {
+                    const currentEpisodes = page.properties['Episode Numbers'].rollup.array.map(episode => episode.number);
+
+                    const { showData, seasonData, episodesData } = await tmdbService.fetchTelevisionShowDetails(tmdbId, false, [], currentEpisodes.length ? true : false, currentEpisodes);
+                    const showDetails = tmdbService.constructDetails(showData, true);
+
+                    if (seasonData && episodesData) {
+                        const seasonDetails = await tmdbService.constructSeasonDetails(seasonData, showData);
+
+                        const episodesPromises = episodesData.map(async episodeData => {
+                            return await tmdbService.constructEpisodeDetails(episodeData, showData, seasonData);
+                        });
+                        seasonDetails.episodes = await Promise.all(episodesPromises);
+
+                        showDetails.seasons = [seasonDetails];
+                    }
+
+                    await notionService.updateDatabase(page, showDetails);
+                } catch (error) {
+                    console.error('Error auto-updating an unreleased miniseries:', error);
+                    const details = { error: 'An error occurred while auto-updating an unreleased miniseries! Ensure the TMDB ID was not altered by mistake.' };
+                    await notionService.updateDatabase(page, details);
+                }
             }
         } catch (error) {
             console.error('Error updating unreleased content in Notion database:', error);
@@ -224,19 +246,22 @@ const checkForRefreshRequests = async () => {
                 }
             } else if (type === 'Miniseries') {
                 try {
-                    const currentEpisodes = page.properties['Episode Numbers'].rollup.array.map(episode => episode.number);
-                    const { showData, seasonsData } = await tmdbService.fetchTelevisionShowDetails(tmdbId, currentEpisodes.length ? true : false, [], currentEpisodes.length ? true : false);
+                    const includeEpisodes = (page.properties['Episode Numbers'].rollup.array.map(episode => episode.number)).length > 0;
+
+                    const { showData, seasonsData } = await tmdbService.fetchTelevisionShowDetails(tmdbId, includeEpisodes, [], includeEpisodes);
                     const showDetails = tmdbService.constructDetails(showData, true);
 
-                    const seasonsPromises = seasonsData.map(async seasonData => {
-                        const seasonDetails = await tmdbService.constructSeasonDetails(seasonData.seasonData, showData)
-                        const episodesPromises = seasonData.episodesData.map(async episodeData => {
-                            return await tmdbService.constructEpisodeDetails(episodeData, showData, seasonData.seasonData)
+                    if (seasonsData) {
+                        const seasonsPromises = seasonsData.map(async seasonData => {
+                            const seasonDetails = await tmdbService.constructSeasonDetails(seasonData.seasonData, showData)
+                            const episodesPromises = seasonData.episodesData.map(async episodeData => {
+                                return await tmdbService.constructEpisodeDetails(episodeData, showData, seasonData.seasonData)
+                            });
+                            seasonDetails.episodes = await Promise.all(episodesPromises);
+                            return seasonDetails;
                         });
-                        seasonDetails.episodes = await Promise.all(episodesPromises);
-                        return seasonDetails;
-                    });
-                    showDetails.seasons = await Promise.all(seasonsPromises);
+                        showDetails.seasons = await Promise.all(seasonsPromises);
+                    }
 
                     await notionService.updateDatabase(page, showDetails, true);
                 } catch (error) {

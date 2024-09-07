@@ -85,8 +85,14 @@ const fetchTelevisionShowDetails = async (showId, includeSeasons = false, curren
                 showData: showData,
                 seasonsData: await Promise.all(seasonsPromises)
             };
-        } else if (includeEpisodes) {
-            // TODO: Get missing episodes (only relevant for miniseries, where the episodes are related directly to the show rather than a season)
+        } else if (includeEpisodes) { // Only necessary for minseries, where episodes are related directly to the show
+            const { seasonData, episodesData } = await fetchTelevisionSeasonDetails(showId, 1, true, currentEpisodes);
+
+            return {
+                showData: showData,
+                seasonData: seasonData,
+                episodesData: episodesData
+            };
         }
 
         return {

@@ -69,8 +69,16 @@ const fetchTelevisionShowDetails = async (showId, includeSeasons = false, curren
                 .map(season => season.season_number);
 
             const seasonsPromises = newSeasons.map(async (seasonNumber) => {
-                const { seasonData } = await fetchTelevisionSeasonDetails(showId, seasonNumber);
-                return seasonData;
+                if (includeEpisodes) {
+                    const { seasonData, episodesData } = await fetchTelevisionSeasonDetails(showId, seasonNumber, true);
+                    return {
+                        seasonData: seasonData,
+                        episodesData: episodesData
+                    };
+                } else {
+                    const { seasonData } = await fetchTelevisionSeasonDetails(showId, seasonNumber);
+                    return seasonData;
+                }
             });
 
             return {

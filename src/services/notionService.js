@@ -9,7 +9,7 @@ const notionTitleDelimiter = ';';
  * Fetch Notion pages where "Title" ends with the delimiter ';'.
  * @returns 
  */
-const fetchNotionPages = async () => {
+const fetchUpdatedPages = async () => {
     // Query Notion pages where page title ends with the delimiter
     const query = { 
         database_id: notionDatabaseId,
@@ -22,6 +22,7 @@ const fetchNotionPages = async () => {
 
         // Get all pages if results are paginated
         while (nextCursor) {
+            query.start_cursor = nextCursor;
             const nextResponse = await notion.databases.query(query);
             response.results.push(...nextResponse.results);
             nextCursor = nextResponse.next_cursor;
@@ -38,7 +39,7 @@ const fetchNotionPages = async () => {
  * release date is on or after today's date.
  * @returns
  */
-const fetchNotionUnreleasedPages = async () => {
+const fetchUnreleasedPages = async () => {
     const today = new Date().toISOString().split('T')[0];
 
     const query = {
@@ -64,6 +65,7 @@ const fetchNotionUnreleasedPages = async () => {
 
         // Get all pages if results are paginated
         while (nextCursor) {
+            query.start_cursor = nextCursor;
             const nextResponse = await notion.databases.query(query);
             response.results.push(...nextResponse.results);
             nextCursor = nextResponse.next_cursor;
@@ -75,6 +77,35 @@ const fetchNotionUnreleasedPages = async () => {
     }
 };
 
+const fetchNeedsRefreshPages = async () => {
+    const query = {
+        database_id: notionDatabaseId,
+        filter: {
+            and: [
+                { property: 'Refresh Metadata', checkbox: { equals: true } },
+                { property: 'TMDB ID', number: { is_not_empty: true } }
+            ]
+        }
+    }
+
+    try {
+        const response = await notion.databases.query(query);
+        let nextCursor = response.next_cursor;
+
+        // Get all pages if results are paginated
+        while (nextCursor) {
+            query.start_cursor = nextCursor;
+            const nextResponse = await notion.databases.query(query);
+            response.results.push(...nextResponse.results);
+            nextCursor = nextResponse.next_cursor;
+        }
+
+        return response.results;
+    } catch (error) {
+        console.error('Error fetching pages that requested a metadata refresh:', error);
+    }
+};
+
 /**
  * Get the TMDB show ID of the parent show of the season "seasonPage".
  * @param {*} seasonPage 
@@ -82,11 +113,10 @@ const fetchNotionUnreleasedPages = async () => {
  */
 const getTMDBShowIdFromSeason = async (seasonPage) => {
     try {
-        const show = await notion.pages.retrieve({
+        const showPage = await notion.pages.retrieve({
             page_id: seasonPage.properties['Show'].relation[0].id
         });
-
-        return show.properties['TMDB ID'].number;
+        return showPage.properties['TMDB ID'].number;
     } catch (error) {
         console.error('Error fetching the TMDB show ID from season page:', error);
     }
@@ -99,19 +129,72 @@ const getTMDBShowIdFromSeason = async (seasonPage) => {
  */
 const getTMDBShowIdFromEpisode = async (episodePage) => {
     try {
-        const season = await notion.pages.retrieve({
+        const seasonPage = await notion.pages.retrieve({
             page_id: episodePage.properties['Season'].relation[0].id
         });
 
-        const show = await notion.pages.retrieve({
-            page_id: season.properties['Show'].relation[0].id
-        });
+        const showPageId = seasonPage.properties['Show'].relation.length ? seasonPage.properties['Show'].relation[0].id : null;
 
-        return show.properties['TMDB ID'].number;
+        if (showPageId) { // For a regular TV episode (episode is related to a season, which is related to the show)
+            const showPage = await notion.pages.retrieve({
+                page_id: showPageId
+            });
+            return showPage.properties['TMDB ID'].number;
+        } else { // For a miniseries TV episode (episode is related to a show directly, via the "Season" relation property)
+            return seasonPage.properties['TMDB ID'].number;
+        }
     } catch (error) {
         console.error('Error fetching the TMDB show ID from episode page:', error);
     }
 };
+
+async function getSeasonPages(showPageId) {
+    const query = {
+        database_id: notionDatabaseId,
+        filter: { property: 'Show', relation: { contains: showPageId } },
+    };
+
+    try {
+        const response = await notion.databases.query(query);
+        let nextCursor = response.next_cursor;
+
+        // Get all pages if results are paginated
+        while (nextCursor) {
+            query.start_cursor = nextCursor;
+            const nextResponse = await notion.databases.query(query);
+            response.results.push(...nextResponse.results);
+            nextCursor = nextResponse.next_cursor;
+        }
+
+        return response.results;
+    } catch (error) {
+        console.error('Error fetching season pages:', error);
+    }
+}
+
+async function getEpisodePages(seasonPageId) {
+    const query = {
+        database_id: notionDatabaseId,
+        filter: { property: 'Season', relation: { contains: seasonPageId } },
+    };
+
+    try {
+        const response = await notion.databases.query(query);
+        let nextCursor = response.next_cursor;
+
+        // Get all pages if results are paginated
+        while (nextCursor) {
+            query.start_cursor = nextCursor;
+            const nextResponse = await notion.databases.query(query);
+            response.results.push(...nextResponse.results);
+            nextCursor = nextResponse.next_cursor;
+        }
+
+        return response.results;
+    } catch (error) {
+        console.error('Error fetching episode pages:', error);
+    }
+}
 
 /**
  * Constructs a Notion properites object from "details".
@@ -178,6 +261,7 @@ function constructNotionProperties(details) {
     if (details.tmdbId) {
         properties['TMDB ID'] = { number: details.tmdbId };
     }
+    properties['Refresh Metadata'] = { checkbox: false };
 
     return properties;
 }
@@ -238,6 +322,24 @@ async function createNotionSeasonPage(showPageId, details) {
     }
 }
 
+async function updateNotionPage(pageId, details) {
+    const properties = constructNotionProperties(details);
+    const icon = details.poster ? { type: 'external', external: { url: details.poster } } : null;
+    const cover = details.backdrop ? { type: 'external', external: { url: details.backdrop } } : null;
+
+    try {
+        await notion.pages.update({
+            page_id: pageId,
+            properties: properties,
+            cover: cover,
+            icon: icon
+        });
+        console.log('Page updated:', details.title);
+    } catch (error) {
+        console.error('Error updating Notion page:', error);
+    }
+}
+
 /**
  * Adds an error block with "message" to the Notion page with ID "pageId".
  * @param {number} pageId 
@@ -253,7 +355,10 @@ async function addErrorBlock(pageId, pageTitle, message) {
         // Update the page title to remove the delimiter (ensure it isn't queried again)
         await notion.pages.update({
             page_id: pageId,
-            properties: { 'Title': { title: [{ text: { content: newTitle } }] } }
+            properties: { 
+                'Title': { title: [{ text: { content: newTitle } }] },
+                'Refresh Metadata': { checkbox: false }
+            },
         });
 
         // Add a "callout" block with the error message to the page
@@ -388,9 +493,9 @@ async function checkIfExists(pageId, pageTitle, tmdbId) {
  * @param {*} details 
  * @returns 
  */
-const updateNotionDatabase = async (page, details) => {
+const updateDatabase = async (page, details, updateExistingForTv = false) => {
     const pageId = page.id;
-    const pageTitle = page.properties.Title.title[0].text.content;
+    const pageTitle = page.properties.Title.title[0]?.text.content || '';
 
     // Remove default message & error message blocks
     await deleteMessageBlocks(pageId);
@@ -407,47 +512,63 @@ const updateNotionDatabase = async (page, details) => {
         return;
     }
 
-    // Create television season & episode pages if necessary
-    if (details.type === 'Miniseries' && details.seasons && details.seasons.length === 1) {
+    // Create or update television season & episode pages if necessary
+    if (details.type === 'Miniseries' && details.seasons && details.seasons.length === 1 && details.seasons[0].episodes) {
         // For miniseries or limited series with one season, create episode pages attached directly to the show (no season pages)
-        if (details.seasons[0].episodes) {
-            for (const episode of details.seasons[0].episodes) {
-                await createNotionEpisodePage(pageId, episode);
+        for (const episodeDetails of details.seasons[0].episodes) {
+            if (updateExistingForTv) { // Update existing episode pages rather than create new ones
+                const currentEpisodePages = await getEpisodePages(pageId);
+                const existingEpisodePage = currentEpisodePages.find(episodePage => episodePage.properties['TMDB ID'].number === episodeDetails.tmdbId);
+                if (existingEpisodePage) {
+                    await updateNotionPage(existingEpisodePage.id, episodeDetails);
+                    continue;
+                }
+                await createNotionEpisodePage(pageId, episodeDetails);
+            } else {
+                await createNotionEpisodePage(pageId, episodeDetails);
             }
         }
     } else if (details.seasons) {
         // Create TV show season pages (this will also create episode pages for each season if necessary)
-        for (const season of details.seasons) {
-            await createNotionSeasonPage(pageId, season);
+        for (const seasonDetails of details.seasons) {
+            if (updateExistingForTv) { // Update existing season pages rather than create new ones
+                const currentSeasonPages = await getSeasonPages(pageId);
+                const existingSeasonPage = currentSeasonPages.find(seasonPage => seasonPage.properties['TMDB ID'].number === seasonDetails.tmdbId);
+                if (existingSeasonPage) {
+                    await updateNotionPage(existingSeasonPage.id, seasonDetails);
+                    continue;
+                }
+                await createNotionSeasonPage(pageId, seasonDetails);
+            } else {
+                await createNotionSeasonPage(pageId, seasonDetails);
+            }
         }
     } else if (details.episodes) {
         // Create TV show episode pages
-        for (const episode of details.episodes) {
-            await createNotionEpisodePage(pageId, episode);
+        for (const episodeDetails of details.episodes) {
+            if (updateExistingForTv) { // Update existing episode pages rather than create new ones
+                const currentEpisodePages = await getEpisodePages(pageId);
+                const existingEpisodePage = currentEpisodePages.find(episodePage => episodePage.properties['TMDB ID'].number === episodeDetails.tmdbId);
+                if (existingEpisodePage) {
+                    await updateNotionPage(existingEpisodePage.id, episodeDetails);
+                    continue;
+                }
+                await createNotionEpisodePage(pageId, episodeDetails);
+            } else {
+                await createNotionEpisodePage(pageId, episodeDetails);
+            }
         }
     }
 
-    const properties = constructNotionProperties(details);
-    const icon = details.poster ? { type: 'external', external: { url: details.poster } } : null;
-    const cover = details.backdrop ? { type: 'external', external: { url: details.backdrop } } : null;
-
-    try {
-        await notion.pages.update({
-            page_id: pageId,
-            properties: properties,
-            cover: cover,
-            icon: icon
-        });
-        console.log('Page updated:', details.title);
-    } catch (error) {
-        console.error('Error updating Notion database:', error);
-    }
+    // Update the Notion page with the new content
+    await updateNotionPage(pageId, details);
 };
 
 module.exports = { 
-    fetchNotionPages,
-    fetchNotionUnreleasedPages,
+    fetchUpdatedPages,
+    fetchUnreleasedPages,
+    fetchNeedsRefreshPages,
     getTMDBShowIdFromSeason,
     getTMDBShowIdFromEpisode,
-    updateNotionDatabase
+    updateDatabase
 };

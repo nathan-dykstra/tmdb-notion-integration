@@ -1,5 +1,5 @@
 const express = require('express');
-const { startPolling, updateUnreleasedContent } = require('./app'); // TODO remove updateUnreleasedContent from module exports
+const { startPolling } = require('./app');
 
 const app = express();
 const PORT = process.env.PORT || 3000;

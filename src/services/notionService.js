@@ -51,7 +51,7 @@ const fetchUnreleasedPages = async () => {
                     and: [
                         { property: 'Release Status', status: { does_not_equal: 'Released' } },
                         { property: 'Release Status', status: { does_not_equal: 'Ended' } },
-                        { property: 'Release Status', status: { does_not_equal: 'Cancelled' } },
+                        { property: 'Release Status', status: { does_not_equal: 'Canceled' } },
                         { property: 'Release Status', status: { is_not_empty: true } },
                     ]
                 }
@@ -195,6 +195,30 @@ async function getEpisodePages(seasonPageId) {
         console.error('Error fetching episode pages:', error);
     }
 }
+
+const fetchProperty = async (pageId, propertyId) => {
+    const query = {
+        page_id: pageId,
+        property_id: propertyId
+    };
+
+    try {
+        const response = await notion.pages.properties.retrieve(query);
+        let nextCursor = response.next_cursor;
+
+        // Get full rollup value for rollups with many referenced pages
+        while (nextCursor) {
+            query.start_cursor = nextCursor;
+            const nextResponse = await notion.pages.properties.retrieve(query);
+            response.property_item = nextResponse.property_item;
+            nextCursor = nextResponse.next_cursor;
+        }
+
+        return response;
+    } catch (error) {
+        console.error('Error fetching Notion property:', error);
+    }
+};
 
 /**
  * Constructs a Notion properites object from "details".
@@ -531,11 +555,24 @@ const updateDatabase = async (page, details, updateExistingForTv = false) => {
     } else if (details.seasons) {
         // Create TV show season pages (this will also create episode pages for each season if necessary)
         for (const seasonDetails of details.seasons) {
-            if (updateExistingForTv) { // Update existing season pages rather than create new ones
+            if (updateExistingForTv) { // Update existing season & episode pages rather than creating new ones
                 const currentSeasonPages = await getSeasonPages(pageId);
                 const existingSeasonPage = currentSeasonPages.find(seasonPage => seasonPage.properties['TMDB ID'].number === seasonDetails.tmdbId);
                 if (existingSeasonPage) {
                     await updateNotionPage(existingSeasonPage.id, seasonDetails);
+
+                    if (seasonDetails.episodes) {
+                        for (const episodeDetails of seasonDetails.episodes) {
+                            const currentEpisodePages = await getEpisodePages(existingSeasonPage.id);
+                            const existingEpisodePage = currentEpisodePages.find(episodePage => episodePage.properties['TMDB ID'].number === episodeDetails.tmdbId);
+                            if (existingEpisodePage) {
+                                await updateNotionPage(existingEpisodePage.id, episodeDetails);
+                                continue;
+                            }
+                            await createNotionEpisodePage(existingSeasonPage.id, episodeDetails);
+                        }
+                    }
+
                     continue;
                 }
                 await createNotionSeasonPage(pageId, seasonDetails);
@@ -568,6 +605,7 @@ module.exports = {
     fetchUpdatedPages,
     fetchUnreleasedPages,
     fetchNeedsRefreshPages,
+    fetchProperty,
     getTMDBShowIdFromSeason,
     getTMDBShowIdFromEpisode,
     updateDatabase

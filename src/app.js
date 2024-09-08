@@ -65,7 +65,8 @@ const updateUnreleasedContent = async () => {
                     await notionService.updateDatabase(page, details);
                 }
             } else if (type === 'Television') {
-                const currentSeasons = page.properties['Season Numbers'].rollup.array.map(season => season.number);
+                const seasonNumbersProperty = await notionService.fetchProperty(pageId, page.properties['Season Numbers'].id);
+                const currentSeasons = seasonNumbersProperty.results.map(season => season.number);
 
                 try {
                     const { showData, seasonsData } = await tmdbService.fetchTelevisionShowDetails(tmdbId, currentSeasons.length ? true : false, currentSeasons);
@@ -86,7 +87,8 @@ const updateUnreleasedContent = async () => {
                 try {
                     const showId = await notionService.getTMDBShowIdFromSeason(page);
                     const seasonNumber = page.properties['Season Number'].number;
-                    const currentEpisodes = page.properties['Episode Numbers'].rollup.array.map(episode => episode.number);
+                    const episodeNumbersProperty = await notionService.fetchProperty(pageId, page.properties['Episode Numbers'].id);
+                    const currentEpisodes = episodeNumbersProperty.results.map(episode => episode.number);
 
                     try {
                         const { seasonData } = await tmdbService.fetchTelevisionSeasonDetails(showId, seasonNumber, null, currentEpisodes.length ? true : false, currentEpisodes);
@@ -124,7 +126,8 @@ const updateUnreleasedContent = async () => {
                 }
             } else if (type === 'Miniseries') {
                 try {
-                    const currentEpisodes = page.properties['Episode Numbers'].rollup.array.map(episode => episode.number);
+                    const episodeNumbersProperty = await notionService.fetchProperty(pageId, page.properties['Episode Numbers'].id);
+                    const currentEpisodes = episodeNumbersProperty.results.map(episode => episode.number);
 
                     const { showData, seasonData, episodesData } = await tmdbService.fetchTelevisionShowDetails(tmdbId, false, [], currentEpisodes.length ? true : false, currentEpisodes);
                     const showDetails = tmdbService.constructDetails(showData, true);
@@ -182,23 +185,27 @@ const checkForRefreshRequests = async () => {
                 }
             } else if (type === 'Television') {
                 try {
-                    const includeSeasons = (page.properties['Season Numbers'].rollup.array.map(season => season.number)).length > 0;
-                    const includeEpisodes = page.properties['Episodes Count'].rollup.number > 0;
+                    const seasonNumbersProperty = await notionService.fetchProperty(pageId, page.properties['Season Numbers'].id);
+                    const includeSeasons = seasonNumbersProperty.results.length > 0;
+                    const episodesCountProperty = await notionService.fetchProperty(pageId, page.properties['Episodes Count'].id);
+                    const includeEpisodes = episodesCountProperty.property_item.rollup.number > 0;
 
                     const { showData, seasonsData } = await tmdbService.fetchTelevisionShowDetails(tmdbId, includeSeasons, [], includeEpisodes);
                     const showDetails = tmdbService.constructDetails(showData, true);
 
-                    const seasonsPromises = seasonsData.map(async seasonData => {
-                        const seasonDetails = await tmdbService.constructSeasonDetails(seasonData.seasonData ?? seasonData, showData);
-                        if (seasonData.episodesData) {
-                            const episodesPromises = seasonData.episodesData.map(async episodeData => {
-                                return await tmdbService.constructEpisodeDetails(episodeData, seasonData.seasonData, showData)
-                            });
-                            seasonDetails.episodes = await Promise.all(episodesPromises);
-                        }
-                        return seasonDetails;
-                    });
-                    showDetails.seasons = await Promise.all(seasonsPromises);
+                    if (seasonsData) {
+                        const seasonsPromises = seasonsData.map(async seasonData => {
+                            const seasonDetails = await tmdbService.constructSeasonDetails(seasonData.seasonData ?? seasonData, showData);
+                            if (seasonData.episodesData) {
+                                const episodesPromises = seasonData.episodesData.map(async episodeData => {
+                                    return await tmdbService.constructEpisodeDetails(episodeData, showData, seasonData.seasonData)
+                                });
+                                seasonDetails.episodes = await Promise.all(episodesPromises);
+                            }
+                            return seasonDetails;
+                        });
+                        showDetails.seasons = await Promise.all(seasonsPromises);
+                    }
 
                     await notionService.updateDatabase(page, showDetails, true);
                 } catch (error) {
@@ -210,11 +217,12 @@ const checkForRefreshRequests = async () => {
                 try {
                     const showId = await notionService.getTMDBShowIdFromSeason(page);
                     const seasonNumber = page.properties['Season Number'].number;
-                    const includeEpisodes = (page.properties['Episode Numbers'].rollup.array.map(episode => episode.number)).length > 0;
+                    const episodeNumbersProperty = await notionService.fetchProperty(pageId, page.properties['Episode Numbers'].id);
+                    const includeEpisodes = episodeNumbersProperty.results.length > 0;
 
                     const { showData } = await tmdbService.fetchTelevisionShowDetails(showId);
                     const { seasonData, episodesData } = await tmdbService.fetchTelevisionSeasonDetails(showId, seasonNumber, includeEpisodes);
-                    const seasonDetails = await tmdbService.constructSeasonDetails(seasonData, showData, showId);
+                    const seasonDetails = await tmdbService.constructSeasonDetails(seasonData, showData);
 
                     if (episodesData) {
                         const episodesPromises = episodesData.map(async episodeData => {
@@ -246,7 +254,8 @@ const checkForRefreshRequests = async () => {
                 }
             } else if (type === 'Miniseries') {
                 try {
-                    const includeEpisodes = (page.properties['Episode Numbers'].rollup.array.map(episode => episode.number)).length > 0;
+                    const episodeNumbersProperty = await notionService.fetchProperty(pageId, page.properties['Episode Numbers'].id);
+                    const includeEpisodes = episodeNumbersProperty.results.length > 0;
 
                     const { showData, seasonsData } = await tmdbService.fetchTelevisionShowDetails(tmdbId, includeEpisodes, [], includeEpisodes);
                     const showDetails = tmdbService.constructDetails(showData, true);

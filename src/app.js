@@ -13,7 +13,7 @@ const checkForUpdates = async () => {
     // Get pages from Notion database
     const pages = await notionService.fetchUpdatedPages();
 
-    for (const page of pages) {
+    for (const page of pages ?? []) {
         const queryString = page.properties.Title.title[0].text.content;
         const pageId = page.id;
 
@@ -42,7 +42,7 @@ const updateUnreleasedContent = async () => {
     // Get unreleased pages from Notion database
     const pages = await notionService.fetchUnreleasedPages();
 
-    for (const page of pages) {
+    for (const page of pages ?? []) {
         const pageId = page.id;
         const tmdbId = page.properties['TMDB ID'].number;
         const type = page.properties['Type'].select.name;
@@ -161,7 +161,7 @@ const updateUnreleasedContent = async () => {
 const checkForRefreshRequests = async () => {
     const pages = await notionService.fetchNeedsRefreshPages();
 
-    for (const page of pages) {
+    for (const page of pages ?? []) {
         const pageId = page.id;
         const tmdbId = page.properties['TMDB ID'].number;
         const type = page.properties['Type'].select.name;

@@ -308,4 +308,9 @@ const startPolling = () => {
     scheduleDailyUpdate();
 };
 
-module.exports = { startPolling };
+const processWebhook = () => {
+    // Process incoming webhook from Notion
+    
+};
+
+module.exports = { startPolling, processWebhook };

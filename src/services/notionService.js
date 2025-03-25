@@ -135,12 +135,12 @@ const getTMDBShowIdFromEpisode = async (episodePage) => {
 
         const showPageId = seasonPage.properties['Show'].relation.length ? seasonPage.properties['Show'].relation[0].id : null;
 
-        if (showPageId) { // For a regular TV episode (episode is related to a season, which is related to the show)
+        if (showPageId) { // Regular TV episode (episode is related to a season, which is related to the show)
             const showPage = await notion.pages.retrieve({
                 page_id: showPageId
             });
             return showPage.properties['TMDB ID'].number;
-        } else { // For a miniseries TV episode (episode is related to a show directly, via the "Season" relation property)
+        } else { // Miniseries TV episode (episode is related to a show directly, via the "Season" relation property)
             return seasonPage.properties['TMDB ID'].number;
         }
     } catch (error) {
@@ -608,5 +608,6 @@ module.exports = {
     fetchProperty,
     getTMDBShowIdFromSeason,
     getTMDBShowIdFromEpisode,
-    updateDatabase
+    updateDatabase,
+    notionTitleDelimiter
 };

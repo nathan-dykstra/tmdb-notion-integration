@@ -1,14 +1,20 @@
 const express = require('express');
-const { startPolling, processWebhook } = require('./app');
+const { scheduleDailyUpdate, processTitleWebhook, processCheckboxWebook } = require('./app');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-startPolling();
+scheduleDailyUpdate();
 
-app.post('/webhook', (req, res) => {
-    console.log('Received webhook:', req.body);
-    processWebhook(req.body);
+app.use(express.json());
+
+app.post('/title-webhook', (req, res) => {
+    processTitleWebhook(req.body);
+    res.status(200).send('Received webhook');
+});
+
+app.post('/checkbox-webhook', (req, res) => {
+    processCheckboxWebook(req.body);
     res.status(200).send('Received webhook');
 });
 

@@ -496,6 +496,11 @@ const fetchTMDBDetails = async (name) => {
             }
             options.url = `${baseTmdbUrl}/search/tv`;
         }
+    } else if (tmdbQuery.filters.year) {
+        // Default to movie search if year is specified but type is not
+        tmdbQuery.filters.type = 'movie';
+        params.primary_release_year = tmdbQuery.filters.year;
+        options.url = `${baseTmdbUrl}/search/movie`;
     } else {
         // Multi search type
         options.url = `${baseTmdbUrl}/search/multi`;

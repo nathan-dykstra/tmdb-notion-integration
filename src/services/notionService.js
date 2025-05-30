@@ -309,7 +309,7 @@ async function createNotionEpisodePage(seasonPageId, details) {
             cover: cover,
             icon: icon
         });
-        console.log('Page created:', details.title);
+        console.log(`Page created: "${details.title}"`);
     } catch (error) {
         console.error('Error creating Notion page:', error);
     }
@@ -334,7 +334,7 @@ async function createNotionSeasonPage(showPageId, details) {
             cover: cover,
             icon: icon
         });
-        console.log('Page created:', details.title);
+        console.log(`Page created: "${details.title}"`);
 
         if (details.episodes) {
             for (const episode of details.episodes) {
@@ -358,7 +358,7 @@ async function updateNotionPage(pageId, details) {
             cover: cover,
             icon: icon
         });
-        console.log('Page updated:', details.title);
+        console.log(`Page updated: "${details.title}"`);
     } catch (error) {
         console.error('Error updating Notion page:', error);
     }
